@@ -1,17 +1,83 @@
 import numpy as np
 from keras.models import Model
-from keras.layers import add,concatenate, Flatten, Dense, Input, Dropout, Activation, Reshape
+from keras.layers import add,concatenate, Flatten, Dense, Input, Dropout, Activation, Reshape, Multiply,Add
 from keras.layers import Conv2D, MaxPooling2D, ZeroPadding2D, UpSampling2D,Conv2DTranspose
 from keras.layers import BatchNormalization
 from keras.layers.noise import GaussianNoise
 import h5py
+
 np.random.seed(4)
 
 VGG16_WEIGHTS_NOTOP = 'pretrained_weights/vgg16_notop.h5'
 # download .h5 weights from https://gist.github.com/baraldilorenzo/07d7802847aaad0a35d3
 
+def Attention_bolck(x,g):
+    f_int = 16
+    g1 = Conv2D(f_int,(1,1))(g)
+    x1 = Conv2D(f_int,(1,1))(x)
+    psi = Activation('relu')(Add()([g1,x1]))         #keras 用layer的单独调用relu
+    psi = Conv2D(1,(1,1),activation = 'sigmoid')(psi)
+    # psi = RepeatVector(16)(psi)
+    # out = Lambda(lambda x : (K.dot(x)))((psi,x))
+    return  Multiply()([psi,x])
 
 def get_unet(img_rows, img_cols, loss , optimizer, metrics, channels = 3):
+
+    inputs = Input((img_rows, img_cols, channels))
+    gaussian_noise_std = 0.025
+    input_with_noise = GaussianNoise(gaussian_noise_std)(inputs)
+    conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(input_with_noise)
+    conv1 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv1)
+    pool1 = MaxPooling2D(pool_size=(2, 2))(conv1)
+
+    conv2 = Conv2D(64, (3, 3), activation='relu', padding='same')(pool1)
+    conv2 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv2)
+    pool2 = MaxPooling2D(pool_size=(2, 2))(conv2)
+
+    conv3 = Conv2D(128, (3, 3), activation='relu', padding='same')(pool2)
+    conv3 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv3)
+    pool3 = MaxPooling2D(pool_size=(2, 2))(conv3)
+
+    conv4 = Conv2D(256, (3, 3), activation='relu', padding='same')(pool3)
+    conv4 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv4)
+    pool4 = MaxPooling2D(pool_size=(2, 2))(conv4)
+
+    conv5 = Conv2D(512, (3, 3), activation='relu', padding='same')(pool4)
+    conv5 = Conv2D(512, (3, 3), activation='relu', padding='same')(conv5)
+
+    up6 = Conv2DTranspose(256, (2, 2), strides=(2, 2), padding='same')(conv5)
+    at6 = Attention_bolck(up6, conv4)
+    up6 = concatenate([up6,at6], axis=3)
+    conv6 = Conv2D(256, (3, 3), activation='relu', padding='same')(up6)
+    conv6 = Conv2D(256, (3, 3), activation='relu', padding='same')(conv6)
+
+    up7 = Conv2DTranspose(128, (2, 2), strides=(2, 2), padding='same')(conv6)
+    at7 = Attention_bolck(up7, conv3)
+    up7 = concatenate([up7, at7], axis=3)
+    conv7 = Conv2D(128, (3, 3), activation='relu', padding='same')(up7)
+    conv7 = Conv2D(128, (3, 3), activation='relu', padding='same')(conv7)
+
+    up8 = Conv2DTranspose(64, (2, 2), strides=(2, 2), padding='same')(conv7)
+    at8 = Attention_bolck(up8,conv2)
+    up8 = concatenate([up8, at8], axis=3)
+    conv8 = Conv2D(64, (3, 3), activation='relu', padding='same')(up8)
+    conv8 = Conv2D(64, (3, 3), activation='relu', padding='same')(conv8)
+
+    up9 = Conv2DTranspose(32, (2, 2), strides=(2, 2), padding='same')(conv8)
+    at9 = Attention_bolck(up9,conv1)
+    up9 = concatenate([up9, at9], axis=3)
+    conv9 = Conv2D(32, (3, 3), activation='relu', padding='same')(up9)
+    conv9 = Conv2D(32, (3, 3), activation='relu', padding='same')(conv9)
+
+    conv10 = Conv2D(1, (1, 1), activation='sigmoid')(conv9)
+
+    model = Model(inputs=[inputs], outputs=[conv10])
+
+    model.compile(optimizer=optimizer, loss=loss, metrics=metrics)
+
+    return model
+
+def get_unet1(img_rows, img_cols, loss , optimizer, metrics, channels = 3):
 
     inputs = Input((img_rows, img_cols, channels))
     gaussian_noise_std = 0.025
